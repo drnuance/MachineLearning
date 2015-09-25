@@ -1,0 +1,80 @@
+---
+title: "Weight Lifting Prediction for Practical Machine Learning"
+author: "Qian Wang"
+date: "September 23, 2015"
+output: html_document
+---
+
+
+## Executive summary
+
+This report utilizes the Weight Lifting Exercises Dataset, which can be found [here](http://groupware.les.inf.puc-rio.br/har), to build a model to predict the way people are doing weightlifting.
+
+## Data retrieval and imputing
+
+First we retrieve the data and briefly check the data using `View()`. We found that the NA values are represented in several ways. So, it is firstly corrected using the following simple code:
+
+```{r warning=FALSE, cache=TRUE}
+library(dplyr)
+library(caret)
+input <- read.csv("pml-training.csv", na.strings=c("NA","", "#DIV/0!"))
+```
+
+In the mean time, we found there are two important tasks that need to be completed:
+
+  -  There are a lot of NA values in many columns, indicating that we can remove them with very little information lost. For instance, we found that all values in column `kurtosis_yaw_dumbbel` are NA. While the number of variables will be reduced greatly, accelerating analysis speed. 
+  -  Data types for most of 160 variables are not correct, which should be modified accordingly before meaning analysis;
+
+To decide which columns to remove, the following code is used. The identificiation criterion is that there is less than `5%` records that are meaningful. We can see that 100 columns are removed, which is a great progress.  
+
+```{r, cache=TRUE}
+toRm <- vector()
+for (i in colnames(input)) {
+        n <- sum(!is.na(input[i]))
+        if (n < nrow(input) * 0.05) toRm <- c(toRm, i)
+}
+imput <- select(input, -which(names(input) %in% toRm)) 
+rm(input)
+```
+  
+To check the correctness of column data types, we use `str(imput)` and `head(imput)` to check. We found that all column data types are appropriate, except for cvtd_timestamp as factor. But it is ok for now given that we have timestamps. So, we stop data imputing here and proceed to model building and training. 
+
+##  Model training and validation
+
+The model training and validation code is as below. We tried several models (`method=""`) and use the correctiness ratio (`sum(predictionResults$table) - sum(diag(predictionResults$table))`) as the indicator to choosing appropriate models. 
+
+```{r, cache=TRUE, warning=FALSE}
+set.seed(10) # Set a seed for reproducibility
+
+# Split the training set in two parts at the normal 70/30 ratio
+inTrain <- createDataPartition(imput$classe, p=0.7, list = FALSE)
+
+imput.train <- imput[inTrain,]
+imput.test <- imput[-inTrain,]
+
+stTime <- Sys.time()
+modelFitRF <- train(classe ~ ., data = imput.train, method="rf", 
+                  preProcess = c("BoxCox", "center", "scale", "pca"),
+                  importance=TRUE)
+predictionResultsRF <- confusionMatrix(imput.test$classe, predict(modelFitRF, imput.test))
+predictionResultsRF$table
+sum(predictionResultsRF$table) - sum(diag(predictionResultsRF$table)) # error rate
+edTime <- Sys.time()
+edTime - stTime # model building time
+```
+
+One thing we notice is that the Random Forest model runs slowly. To accelerate this, PCA is added. And BoxCox transformation is used to get better preprocess data. However, the results show that, although PCA reduces the number of variables to 26 with 95% information, the running speed is roughly the same. This is a question not answered to me. 
+
+With the testing infrasture, four models are tested: Random Forest, Bayesian GLM, Neural Network, and SVM. Results show that Random Forest and Neural Network generate satisfactory result - 86 and 113 erros respectively. But both take long time to run - 110 and 37 mins respectively. 
+
+Given that, we choose the Random Forest model with highest accurcy to predict. 
+
+## Model prediction
+
+Now we have a descend model. We can use it to make prediction, which is the test data this time. Code is:
+
+```{r, cache=TRUE}
+test <- read.csv("pml-testing.csv", na.strings=c("NA","", "#DIV/0!"))
+test <- select(test, -which(names(test) %in% toRm))  # remove redudant columns to be consistent
+predict(modelFitRF, test)
+```
